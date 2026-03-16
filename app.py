@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 
 # 1️⃣ URL de l'API
-API_URL = "http://127.0.0.1:5000/analyser"
+API_URL = "https://cybertrust-africa.onrender.com/analyser"
 
 # 2️⃣ Titre de la plateforme
 st.title("🌍 CyberTrust Africa")
