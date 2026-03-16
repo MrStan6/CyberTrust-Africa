@@ -3,3 +3,7 @@ scikit-learn
 streamlit
 joblib
 gunicorn
+flask
+numpy
+requests
+instaloader
