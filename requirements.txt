@@ -7,3 +7,7 @@ flask
 numpy
 requests
 instaloader
+flask-login
+flask-bcrypt
+flask-limiter
+python-dotenv
