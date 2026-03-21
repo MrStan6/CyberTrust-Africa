@@ -1,197 +1,452 @@
 # ==============================
 # CyberTrust Africa
-# API Flask + Sécurité + Historique
+# API Flask — v6.0 PostgreSQL
 # ==============================
 
-from flask import Flask, request, jsonify, session
+from flask import Flask, request, jsonify, send_file
 from flask_bcrypt import Bcrypt
-from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_jwt_extended import JWTManager, create_access_token
+from flask_talisman import Talisman
+from flask_cors import CORS
+from cryptography.fernet import Fernet
+from sqlalchemy import create_engine, text
 import joblib
 import numpy as np
 import csv
+import io
 import os
-from datetime import datetime
+import re
+import logging
+import requests as http_requests
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-# Charger les variables d'environnement
 load_dotenv()
 
-# 1️⃣ Créer l'application Flask
+logging.basicConfig(level=logging.ERROR, format='%(asctime)s %(levelname)s %(message)s')
+
 app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY", "cybertrust_secret_2026")
+app.secret_key = os.getenv("SECRET_KEY")
+app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY")
+app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=24)
 
-# 2️⃣ Initialiser les extensions
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:8501").split(",")
+CORS(app, origins=ALLOWED_ORIGINS, supports_credentials=True)
+
 bcrypt = Bcrypt(app)
-login_manager = LoginManager(app)
-limiter = Limiter(
-    app=app,
-    key_func=get_remote_address,
-    default_limits=["100 per day", "10 per minute"]
-)
+jwt = JWTManager(app)
 
-# 3️⃣ Charger le modèle IA
+Talisman(app, force_https=False, strict_transport_security=True,
+         x_content_type_options=True, frame_options='DENY', content_security_policy=False)
+
+limiter = Limiter(app=app, key_func=get_remote_address,
+                  default_limits=["100 per day", "10 per minute"])
+
+ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "").encode()
+try:
+    fernet = Fernet(ENCRYPTION_KEY)
+except Exception:
+    fernet = None
+
+ADMIN_KEY = os.getenv("ADMIN_KEY", "")
+
 model = joblib.load("models/cybertrust_model.pkl")
 
-# 4️⃣ Base de données simple (fichier CSV)
-USERS_FILE = "users.csv"
-HISTORIQUE_FILE = "historique.csv"
+# ==============================
+# PostgreSQL — Connexion
+# ==============================
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+engine = None
 
-# Créer les fichiers si inexistants
-def initialiser_fichiers():
-    if not os.path.exists(USERS_FILE):
-        with open(USERS_FILE, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["id", "email", "mot_de_passe"])
+def get_engine():
+    global engine
+    if engine is None and DATABASE_URL:
+        try:
+            engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+        except Exception as e:
+            logging.error(f"Erreur connexion DB: {str(e)}")
+    return engine
 
-    if not os.path.exists(HISTORIQUE_FILE):
-        with open(HISTORIQUE_FILE, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                "user_email",
-                "date",
-                "compte_analyse"
-            ])
+def execute_query(query, params=None, fetch=False):
+    eng = get_engine()
+    if not eng:
+        return None
+    try:
+        with eng.connect() as conn:
+            result = conn.execute(text(query), params or {})
+            conn.commit()
+            if fetch:
+                return result.fetchall()
+            return True
+    except Exception as e:
+        logging.error(f"Erreur SQL: {str(e)}")
+        return None
 
-initialiser_fichiers()
+# ==============================
+# Initialiser les tables PostgreSQL
+# ==============================
+def initialiser_tables():
+    queries = [
+        """
+        CREATE TABLE IF NOT EXISTS utilisateurs (
+            id VARCHAR(50) PRIMARY KEY,
+            email TEXT NOT NULL,
+            mot_de_passe TEXT NOT NULL,
+            date_inscription VARCHAR(20),
+            pays VARCHAR(100),
+            ville VARCHAR(100)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS historique (
+            id SERIAL PRIMARY KEY,
+            user_email TEXT,
+            date VARCHAR(20),
+            compte_analyse VARCHAR(100),
+            resultat VARCHAR(50),
+            score_authenticite FLOAT,
+            score_suspicion FLOAT
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS collecte (
+            id SERIAL PRIMARY KEY,
+            date VARCHAR(20),
+            user_email TEXT,
+            user_pays VARCHAR(100),
+            user_ville VARCHAR(100),
+            ip_address TEXT,
+            pays_ip VARCHAR(100),
+            ville_ip VARCHAR(100),
+            compte_analyse VARCHAR(100),
+            nom_complet VARCHAR(200),
+            resultat VARCHAR(50),
+            score_authenticite FLOAT,
+            score_suspicion FLOAT
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS regional (
+            id SERIAL PRIMARY KEY,
+            date VARCHAR(20),
+            user_email TEXT,
+            user_pays VARCHAR(100),
+            user_ville VARCHAR(100),
+            compte_analyse VARCHAR(100),
+            nom_complet VARCHAR(200),
+            resultat VARCHAR(50),
+            score_authenticite FLOAT,
+            score_suspicion FLOAT
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS denonciations (
+            id VARCHAR(50) PRIMARY KEY,
+            date VARCHAR(20),
+            user_email TEXT,
+            compte_denonce VARCHAR(100),
+            plateforme VARCHAR(50),
+            type_arnaque VARCHAR(100),
+            description TEXT,
+            montant_escroqué FLOAT,
+            date_incident VARCHAR(20),
+            pays_victime VARCHAR(100),
+            ville_victime VARCHAR(100),
+            score_fiabilite FLOAT,
+            statut VARCHAR(20)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS tentatives (
+            email TEXT PRIMARY KEY,
+            nb_tentatives INTEGER DEFAULT 0,
+            derniere_tentative VARCHAR(20)
+        )
+        """
+    ]
+    for q in queries:
+        execute_query(q)
 
-# 5️⃣ Modèle utilisateur
-class User(UserMixin):
-    def __init__(self, id, email):
-        self.id = id
-        self.email = email
+try:
+    initialiser_tables()
+except Exception as e:
+    logging.error(f"Erreur initialisation tables: {str(e)}")
 
+# ==============================
+# Fonctions utilitaires
+# ==============================
+def chiffrer(donnee):
+    if fernet and donnee:
+        try:
+            return fernet.encrypt(str(donnee).encode()).decode()
+        except Exception:
+            return donnee
+    return donnee
+
+def dechiffrer(donnee):
+    if fernet and donnee:
+        try:
+            return fernet.decrypt(str(donnee).encode()).decode()
+        except Exception:
+            return donnee
+    return donnee
+
+def nettoyer_entree(texte):
+    if not texte:
+        return ""
+    texte = re.sub(r'<[^>]+>', '', str(texte))
+    for c in ["'", '"', ";", "--", "/*", "*/", "DROP", "SELECT",
+              "INSERT", "DELETE", "UPDATE", "UNION", "EXEC", "xp_",
+              "<script>", "</script>", "javascript:"]:
+        texte = texte.replace(c, "")
+    return texte[:500].strip()
+
+def valider_email(email):
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    if not re.match(pattern, email):
+        return False, "Format d'email invalide"
+    if len(email) > 100:
+        return False, "Email trop long"
+    return True, "OK"
+
+def geolocalize_ip(ip):
+    try:
+        if ip in ["127.0.0.1", "localhost", "::1"]:
+            return "Local", "Local"
+        response = http_requests.get(f"http://ip-api.com/json/{ip}?fields=country,city", timeout=3)
+        data = response.json()
+        return data.get("country", "Inconnu"), data.get("city", "Inconnu")
+    except Exception:
+        return "Inconnu", "Inconnu"
+
+def verifier_admin():
+    key = request.headers.get("X-Admin-Key", "")
+    if not ADMIN_KEY or key != ADMIN_KEY:
+        return False
+    return True
+
+# ==============================
+# Gestion tentatives
+# ==============================
+def get_tentatives(email):
+    rows = execute_query(
+        "SELECT nb_tentatives, derniere_tentative FROM tentatives WHERE email = :email",
+        {"email": email}, fetch=True
+    )
+    if rows and len(rows) > 0:
+        return rows[0][0], rows[0][1]
+    return 0, None
+
+def incrementer_tentatives(email):
+    tentatives, _ = get_tentatives(email)
+    if tentatives == 0:
+        execute_query(
+            "INSERT INTO tentatives (email, nb_tentatives, derniere_tentative) VALUES (:email, 1, :date)",
+            {"email": email, "date": datetime.now().strftime("%d/%m/%Y %H:%M")}
+        )
+    else:
+        execute_query(
+            "UPDATE tentatives SET nb_tentatives = nb_tentatives + 1, derniere_tentative = :date WHERE email = :email",
+            {"email": email, "date": datetime.now().strftime("%d/%m/%Y %H:%M")}
+        )
+
+def reinitialiser_tentatives(email):
+    execute_query("DELETE FROM tentatives WHERE email = :email", {"email": email})
+
+# ==============================
+# Fonctions utilisateurs
+# ==============================
 def trouver_utilisateur_par_email(email):
-    if not os.path.exists(USERS_FILE):
+    rows = execute_query(
+        "SELECT id, email, mot_de_passe, date_inscription, pays, ville FROM utilisateurs",
+        fetch=True
+    )
+    if not rows:
         return None
-    with open(USERS_FILE, "r") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            if row["email"] == email:
-                return row
+    for row in rows:
+        try:
+            email_stocke = dechiffrer(row[1])
+        except Exception:
+            email_stocke = row[1]
+        if email_stocke == email:
+            return {
+                "id": row[0], "email": row[1], "mot_de_passe": row[2],
+                "date_inscription": row[3], "pays": row[4], "ville": row[5]
+            }
     return None
 
-def trouver_utilisateur_par_id(user_id):
-    if not os.path.exists(USERS_FILE):
+def compter_denonciations(username):
+    rows = execute_query(
+        "SELECT type_arnaque FROM denonciations WHERE LOWER(compte_denonce) = LOWER(:username) AND statut = 'valide'",
+        {"username": username}, fetch=True
+    )
+    if not rows:
+        return 0, []
+    types = list(set([r[0] for r in rows if r[0]]))
+    return len(rows), types
+
+def compter_analyses_compte(username):
+    rows = execute_query(
+        "SELECT COUNT(*) FROM historique WHERE LOWER(compte_analyse) = LOWER(:username)",
+        {"username": username}, fetch=True
+    )
+    if rows:
+        return rows[0][0]
+    return 0
+
+def get_derniere_analyse_compte(username, user_email):
+    rows = execute_query(
+        "SELECT date, resultat, score_authenticite, score_suspicion, user_email FROM historique WHERE LOWER(compte_analyse) = LOWER(:username) ORDER BY id DESC",
+        {"username": username}, fetch=True
+    )
+    if not rows:
         return None
-    with open(USERS_FILE, "r") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            if row["id"] == str(user_id):
-                return row
+    for row in rows:
+        try:
+            email_stocke = dechiffrer(row[4])
+        except Exception:
+            email_stocke = row[4]
+        if email_stocke == user_email:
+            return {"date": row[0], "resultat": row[1],
+                    "score_authenticite": str(row[2]), "score_suspicion": str(row[3])}
     return None
 
-@login_manager.user_loader
-def load_user(user_id):
-    user = trouver_utilisateur_par_id(user_id)
-    if user:
-        return User(user["id"], user["email"])
-    return None
+def calculer_score_fiabilite(data):
+    score = 0
+    description = data.get("description", "")
+    if len(description) > 100:
+        score += 30
+    elif len(description) > 50:
+        score += 15
+    if data.get("montant_escroqué", 0) > 0:
+        score += 20
+    if data.get("date_incident", ""):
+        score += 15
+    if data.get("plateforme", ""):
+        score += 10
+    if data.get("pays_victime", "") and data.get("ville_victime", ""):
+        score += 15
+    username = data.get("compte_denonce", "")
+    if username:
+        rows = execute_query(
+            "SELECT id FROM regional WHERE LOWER(compte_analyse) = LOWER(:username) LIMIT 1",
+            {"username": username}, fetch=True
+        )
+        if rows:
+            score += 10
+    return min(score, 100)
 
-# 6️⃣ Route principale
+# ==============================
+# Routes
+# ==============================
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({
-        "message": "Bienvenue sur l'API CyberTrust Africa",
-        "version": "3.0",
-        "status": "En ligne ✅"
-    })
+    return jsonify({"message": "Bienvenue sur l'API CyberTrust Africa", "version": "6.0", "status": "En ligne ✅", "database": "PostgreSQL ✅"})
 
-# 7️⃣ Route d'inscription
 @app.route("/inscription", methods=["POST"])
 @limiter.limit("5 per hour")
 def inscription():
     try:
         data = request.json
-        email = data.get("email")
-        mot_de_passe = data.get("mot_de_passe")
+        email = nettoyer_entree(data.get("email", ""))
+        mot_de_passe = data.get("mot_de_passe", "")
+        pays = nettoyer_entree(data.get("pays", ""))
+        ville = nettoyer_entree(data.get("ville", ""))
 
         if not email or not mot_de_passe:
             return jsonify({"erreur": "Email et mot de passe requis"}), 400
-
-        # Vérifier si l'email existe déjà
+        valide, message = valider_email(email)
+        if not valide:
+            return jsonify({"erreur": message}), 400
         if trouver_utilisateur_par_email(email):
             return jsonify({"erreur": "Email déjà utilisé"}), 400
 
-        # Hasher le mot de passe
-        mot_de_passe_hash = bcrypt.generate_password_hash(
-            mot_de_passe
-        ).decode("utf-8")
-
-        # Générer un ID unique
+        mot_de_passe_hash = bcrypt.generate_password_hash(mot_de_passe).decode("utf-8")
         user_id = str(datetime.now().timestamp()).replace(".", "")
 
-        # Sauvegarder l'utilisateur
-        with open(USERS_FILE, "a", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow([user_id, email, mot_de_passe_hash])
+        execute_query(
+            "INSERT INTO utilisateurs (id, email, mot_de_passe, date_inscription, pays, ville) VALUES (:id, :email, :mdp, :date, :pays, :ville)",
+            {"id": user_id, "email": chiffrer(email), "mdp": mot_de_passe_hash,
+             "date": datetime.now().strftime("%d/%m/%Y %H:%M"), "pays": pays, "ville": ville}
+        )
 
+        access_token = create_access_token(identity=email)
         return jsonify({
             "message": "Compte créé avec succès ✅",
-            "email": email
+            "email": email, "token": access_token,
+            "pays": pays, "ville": ville, "connexion_auto": True
         })
 
     except Exception as e:
-        return jsonify({"erreur": str(e)}), 500
+        logging.error(f"Erreur inscription: {str(e)}")
+        return jsonify({"erreur": "Erreur serveur"}), 500
 
-# 8️⃣ Route de connexion
 @app.route("/connexion", methods=["POST"])
-@limiter.limit("10 per hour")
+@limiter.limit("5 per hour")
 def connexion():
     try:
         data = request.json
-        email = data.get("email")
-        mot_de_passe = data.get("mot_de_passe")
+        email = nettoyer_entree(data.get("email", ""))
+        mot_de_passe = data.get("mot_de_passe", "")
 
         if not email or not mot_de_passe:
             return jsonify({"erreur": "Email et mot de passe requis"}), 400
 
-        # Trouver l'utilisateur
+        tentatives, derniere = get_tentatives(email)
+        if tentatives >= 5 and derniere:
+            derniere_dt = datetime.strptime(derniere, "%d/%m/%Y %H:%M")
+            if datetime.now() - derniere_dt < timedelta(minutes=30):
+                return jsonify({"erreur": "Compte bloqué — réessayez dans 30 minutes"}), 429
+            else:
+                reinitialiser_tentatives(email)
+
         user = trouver_utilisateur_par_email(email)
-
         if not user:
-            return jsonify({"erreur": "Email ou mot de passe incorrect"}), 401
+            return jsonify({"erreur": "Cet email n'existe pas — Créez un compte", "email_inexistant": True}), 404
 
-        # Vérifier le mot de passe
-        if not bcrypt.check_password_hash(
-            user["mot_de_passe"], mot_de_passe
-        ):
-            return jsonify({"erreur": "Email ou mot de passe incorrect"}), 401
+        if not bcrypt.check_password_hash(user["mot_de_passe"], mot_de_passe):
+            incrementer_tentatives(email)
+            tentatives_restantes = max(0, 4 - tentatives)
+            if tentatives_restantes > 0:
+                return jsonify({"erreur": f"Mot de passe incorrect — {tentatives_restantes} tentatives restantes"}), 401
+            else:
+                return jsonify({"erreur": "Compte bloqué — réessayez dans 30 minutes"}), 429
 
-        # Connecter l'utilisateur
-        user_obj = User(user["id"], user["email"])
-        login_user(user_obj)
+        reinitialiser_tentatives(email)
+        access_token = create_access_token(identity=email)
 
         return jsonify({
             "message": "Connexion réussie ✅",
-            "email": email
+            "email": email, "token": access_token,
+            "expire_dans": "24 heures",
+            "pays": user.get("pays", ""),
+            "ville": user.get("ville", ""),
+            "heure_connexion": datetime.now().strftime("%d/%m/%Y %H:%M")
         })
 
     except Exception as e:
-        return jsonify({"erreur": str(e)}), 500
+        logging.error(f"Erreur connexion: {str(e)}")
+        return jsonify({"erreur": "Erreur serveur"}), 500
 
-# 9️⃣ Route de déconnexion
-@app.route("/deconnexion", methods=["POST"])
-@login_required
-def deconnexion():
-    logout_user()
-    return jsonify({"message": "Déconnexion réussie"})
-
-# 🔟 Route d'analyse
 @app.route("/analyser", methods=["POST"])
 @limiter.limit("20 per hour")
 def analyser():
     try:
         data = request.json
-
         if "username" not in data:
             return jsonify({"erreur": "Nom d'utilisateur manquant"}), 400
 
-        username = data["username"]
-        fullname = data.get("fullname", "")
+        username = nettoyer_entree(data["username"])
+        fullname = nettoyer_entree(data.get("fullname", ""))
+        user_email = nettoyer_entree(data.get("user_email", "anonyme"))
+        user_pays = nettoyer_entree(data.get("user_pays", ""))
+        user_ville = nettoyer_entree(data.get("user_ville", ""))
 
-        # Calculer les proportions
+        derniere_analyse = get_derniere_analyse_compte(username, user_email)
+        nb_analyses_total = compter_analyses_compte(username)
+
         username_digits = sum(c.isdigit() for c in username)
         username_length = len(username) if len(username) > 0 else 1
         nums_length_username = username_digits / username_length
@@ -201,82 +456,418 @@ def analyser():
         nums_length_fullname = fullname_digits / fullname_length
 
         fullname_words = len(fullname.split())
-        name_equals_username = 1 if fullname.lower() == username.lower() else 0
+        name_equals_username = 1 if (fullname.lower().strip() == username.lower().strip() and username != "") else 0
 
-        # Préparer les données
         user_data = np.array([[
-            data.get("profile_pic", 1),
-            nums_length_username,
-            fullname_words,
-            nums_length_fullname,
-            name_equals_username,
-            data.get("description_length", 0),
-            data.get("external_url", 0),
-            data.get("private", 0),
-            data.get("posts", 0),
-            data.get("followers", 0),
-            data.get("follows", 0)
+            data.get("profile_pic", 1), nums_length_username, fullname_words,
+            nums_length_fullname, name_equals_username, data.get("description_length", 0),
+            data.get("external_url", 0), data.get("private", 0),
+            data.get("posts", 0), data.get("followers", 0), data.get("follows", 0)
         ]])
 
-        # Prédiction
         prediction = model.predict(user_data)
         probability = model.predict_proba(user_data)
-
         score_authentique = round(probability[0][0] * 100, 2)
         score_fake = round(probability[0][1] * 100, 2)
+        resultat = "Compte authentique ✅" if prediction[0] == 0 else "Compte suspect 🚨"
 
-        if prediction[0] == 0:
-            resultat = "Compte authentique ✅"
-        else:
-            resultat = "Compte suspect 🚨"
+        ip_address = request.remote_addr or "inconnue"
+        pays_ip, ville_ip = geolocalize_ip(ip_address)
+        date_maintenant = datetime.now().strftime("%d/%m/%Y %H:%M")
 
-        # Sauvegarder dans l'historique
-        user_email = current_user.email if current_user.is_authenticated else "anonyme"
+        # Sauvegarder dans historique
+        execute_query(
+            "INSERT INTO historique (user_email, date, compte_analyse, resultat, score_authenticite, score_suspicion) VALUES (:email, :date, :compte, :resultat, :auth, :susp)",
+            {"email": chiffrer(user_email), "date": date_maintenant, "compte": username,
+             "resultat": resultat, "auth": score_authentique, "susp": score_fake}
+        )
 
-        with open(HISTORIQUE_FILE, "a", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                user_email,
-                datetime.now().strftime("%d/%m/%Y %H:%M"),
-                username
-            ])
+        # Sauvegarder dans collecte
+        execute_query(
+            "INSERT INTO collecte (date, user_email, user_pays, user_ville, ip_address, pays_ip, ville_ip, compte_analyse, nom_complet, resultat, score_authenticite, score_suspicion) VALUES (:date, :email, :pays, :ville, :ip, :pays_ip, :ville_ip, :compte, :nom, :resultat, :auth, :susp)",
+            {"date": date_maintenant, "email": chiffrer(user_email), "pays": user_pays,
+             "ville": user_ville, "ip": chiffrer(ip_address), "pays_ip": pays_ip,
+             "ville_ip": ville_ip, "compte": username, "nom": fullname,
+             "resultat": resultat, "auth": score_authentique, "susp": score_fake}
+        )
+
+        # Sauvegarder dans regional (comptes suspects uniques)
+        if prediction[0] == 1:
+            rows = execute_query(
+                "SELECT id FROM regional WHERE LOWER(compte_analyse) = LOWER(:username) LIMIT 1",
+                {"username": username}, fetch=True
+            )
+            if not rows:
+                execute_query(
+                    "INSERT INTO regional (date, user_email, user_pays, user_ville, compte_analyse, nom_complet, resultat, score_authenticite, score_suspicion) VALUES (:date, :email, :pays, :ville, :compte, :nom, :resultat, :auth, :susp)",
+                    {"date": date_maintenant, "email": chiffrer(user_email), "pays": user_pays,
+                     "ville": user_ville, "compte": username, "nom": fullname,
+                     "resultat": resultat, "auth": score_authentique, "susp": score_fake}
+                )
+
+        # Compter signalements région
+        signalements_region = 0
+        if user_pays:
+            rows = execute_query(
+                "SELECT COUNT(*) FROM regional WHERE user_pays = :pays",
+                {"pays": user_pays}, fetch=True
+            )
+            if rows:
+                signalements_region = rows[0][0]
+
+        nb_denonciations, types_arnaque = compter_denonciations(username)
 
         return jsonify({
-            "compte_analyse": username,
-            "resultat": resultat,
-            "score_authenticite": score_authentique,
-            "score_suspicion": score_fake
+            "compte_analyse": username, "resultat": resultat,
+            "score_authenticite": score_authentique, "score_suspicion": score_fake,
+            "signalements_region": signalements_region,
+            "region_utilisateur": f"{user_ville}, {user_pays}" if user_ville and user_pays else user_pays,
+            "nb_denonciations": nb_denonciations, "types_arnaque": types_arnaque,
+            "nb_analyses_total": nb_analyses_total,
+            "deja_analyse_par_user": derniere_analyse is not None,
+            "derniere_analyse": derniere_analyse
         })
 
     except Exception as e:
-        return jsonify({"erreur": str(e)}), 500
+        logging.error(f"Erreur analyse: {str(e)}")
+        return jsonify({"erreur": "Erreur serveur"}), 500
 
-# 1️⃣1️⃣ Route historique
+@app.route("/denoncer", methods=["POST"])
+@limiter.limit("3 per hour")
+def denoncer():
+    try:
+        data = request.json
+        for champ in ["compte_denonce", "plateforme", "type_arnaque", "description", "date_incident"]:
+            if not data.get(champ, ""):
+                return jsonify({"erreur": f"Champ obligatoire manquant : {champ}"}), 400
+
+        description = nettoyer_entree(data.get("description", ""))
+        if len(description) < 50:
+            return jsonify({"erreur": "La description doit contenir au moins 50 caractères"}), 400
+
+        score_fiabilite = calculer_score_fiabilite(data)
+        statut = "valide" if score_fiabilite >= 50 else "en_verification"
+        denonciation_id = str(datetime.now().timestamp()).replace(".", "")
+
+        execute_query(
+            "INSERT INTO denonciations (id, date, user_email, compte_denonce, plateforme, type_arnaque, description, montant_escroqué, date_incident, pays_victime, ville_victime, score_fiabilite, statut) VALUES (:id, :date, :email, :compte, :plateforme, :type, :desc, :montant, :date_inc, :pays, :ville, :score, :statut)",
+            {
+                "id": denonciation_id,
+                "date": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                "email": chiffrer(nettoyer_entree(data.get("user_email", "anonyme"))),
+                "compte": nettoyer_entree(data.get("compte_denonce", "")),
+                "plateforme": nettoyer_entree(data.get("plateforme", "")),
+                "type": nettoyer_entree(data.get("type_arnaque", "")),
+                "desc": description,
+                "montant": data.get("montant_escroqué", 0),
+                "date_inc": nettoyer_entree(data.get("date_incident", "")),
+                "pays": nettoyer_entree(data.get("pays_victime", "")),
+                "ville": nettoyer_entree(data.get("ville_victime", "")),
+                "score": score_fiabilite,
+                "statut": statut
+            }
+        )
+
+        message = "✅ Dénonciation enregistrée" if statut == "valide" else "⚠️ Dénonciation en vérification"
+        return jsonify({"message": message, "score_fiabilite": score_fiabilite, "statut": statut, "id": denonciation_id})
+
+    except Exception as e:
+        logging.error(f"Erreur dénonciation: {str(e)}")
+        return jsonify({"erreur": "Erreur serveur"}), 500
+
 @app.route("/historique", methods=["GET"])
-@login_required
 def historique():
     try:
-        analyses = []
-        user_email = current_user.email
+        user_email = nettoyer_entree(request.args.get("email", ""))
+        if not user_email:
+            return jsonify({"erreur": "Email manquant"}), 400
 
-        with open(HISTORIQUE_FILE, "r") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                if row["user_email"] == user_email:
+        rows = execute_query(
+            "SELECT date, compte_analyse, resultat, score_authenticite, score_suspicion, user_email FROM historique ORDER BY id DESC",
+            fetch=True
+        )
+        analyses = []
+        if rows:
+            for row in rows:
+                try:
+                    email_stocke = dechiffrer(row[5])
+                except Exception:
+                    email_stocke = row[5]
+                if email_stocke == user_email:
                     analyses.append({
-                        "date": row["date"],
-                        "compte_analyse": row["compte_analyse"]
+                        "date": row[0], "compte_analyse": row[1],
+                        "resultat": row[2], "score_authenticite": str(row[3]),
+                        "score_suspicion": str(row[4])
                     })
 
-        return jsonify({
-            "email": user_email,
-            "total_analyses": len(analyses),
-            "historique": analyses
-        })
+        return jsonify({"email": user_email, "total_analyses": len(analyses), "historique": analyses})
 
     except Exception as e:
-        return jsonify({"erreur": str(e)}), 500
+        logging.error(f"Erreur historique: {str(e)}")
+        return jsonify({"erreur": "Erreur serveur"}), 500
 
-# 1️⃣2️⃣ Lancer l'API
+@app.route("/historique/denonciations", methods=["GET"])
+def historique_denonciations():
+    try:
+        user_email = nettoyer_entree(request.args.get("email", ""))
+        if not user_email:
+            return jsonify({"erreur": "Email manquant"}), 400
+
+        maintenant = datetime.now()
+        un_mois = timedelta(days=30)
+        denonciations = []
+
+        rows = execute_query(
+            "SELECT date, compte_denonce, type_arnaque, statut, user_email FROM denonciations ORDER BY id DESC",
+            fetch=True
+        )
+        if rows:
+            for row in rows:
+                try:
+                    email_stocke = dechiffrer(row[4])
+                except Exception:
+                    email_stocke = row[4]
+                if email_stocke == user_email:
+                    try:
+                        date_denon = datetime.strptime(row[0], "%d/%m/%Y %H:%M")
+                        if maintenant - date_denon <= un_mois:
+                            denonciations.append({
+                                "date": row[0], "compte_denonce": row[1],
+                                "type_arnaque": row[2], "statut": row[3]
+                            })
+                    except Exception:
+                        pass
+
+        return jsonify({"total": len(denonciations), "denonciations": denonciations})
+
+    except Exception as e:
+        logging.error(f"Erreur historique dénonciations: {str(e)}")
+        return jsonify({"erreur": "Erreur serveur"}), 500
+
+@app.route("/carte/stats", methods=["GET"])
+def carte_stats():
+    try:
+        stats_pays_suspects = {}
+        stats_pays_denonciations = {}
+
+        rows_r = execute_query(
+            "SELECT user_pays, score_suspicion FROM regional",
+            fetch=True
+        )
+        if rows_r:
+            for row in rows_r:
+                pays = row[0] or ""
+                try:
+                    score = float(row[1])
+                except Exception:
+                    score = 0
+                if pays and score > 60:
+                    stats_pays_suspects[pays] = stats_pays_suspects.get(pays, 0) + 1
+
+        rows_d = execute_query(
+            "SELECT pays_victime FROM denonciations WHERE statut = 'valide'",
+            fetch=True
+        )
+        if rows_d:
+            for row in rows_d:
+                pays = row[0] or ""
+                if pays:
+                    stats_pays_denonciations[pays] = stats_pays_denonciations.get(pays, 0) + 1
+
+        tous_pays = set(list(stats_pays_suspects.keys()) + list(stats_pays_denonciations.keys()))
+        stats_combines = [{"pays": p, "comptes_suspects": stats_pays_suspects.get(p, 0),
+                           "denonciations": stats_pays_denonciations.get(p, 0)} for p in tous_pays]
+
+        return jsonify({"stats": sorted(stats_combines, key=lambda x: x["denonciations"] + x["comptes_suspects"], reverse=True)})
+
+    except Exception as e:
+        logging.error(f"Erreur carte stats: {str(e)}")
+        return jsonify({"erreur": "Erreur serveur"}), 500
+
+@app.route("/admin/collecte", methods=["GET"])
+@limiter.limit("10 per hour")
+def admin_collecte():
+    if not verifier_admin():
+        return jsonify({"erreur": "Accès non autorisé"}), 403
+    try:
+        rows = execute_query(
+            "SELECT date, user_email, user_pays, user_ville, ip_address, pays_ip, ville_ip, compte_analyse, nom_complet, resultat, score_authenticite, score_suspicion FROM collecte ORDER BY id DESC",
+            fetch=True
+        )
+        donnees = []
+        if rows:
+            for row in rows:
+                try:
+                    email = dechiffrer(row[1])
+                    ip = dechiffrer(row[4])
+                except Exception:
+                    email = row[1]
+                    ip = row[4]
+                donnees.append({
+                    "date": row[0], "user_email": email, "user_pays": row[2],
+                    "user_ville": row[3], "ip_address": ip, "pays_ip": row[5],
+                    "ville_ip": row[6], "compte_analyse": row[7], "nom_complet": row[8],
+                    "resultat": row[9], "score_authenticite": str(row[10]), "score_suspicion": str(row[11])
+                })
+        return jsonify({"total": len(donnees), "donnees": donnees})
+    except Exception as e:
+        logging.error(f"Erreur admin collecte: {str(e)}")
+        return jsonify({"erreur": "Erreur serveur"}), 500
+
+@app.route("/admin/utilisateurs", methods=["GET"])
+@limiter.limit("10 per hour")
+def admin_utilisateurs():
+    if not verifier_admin():
+        return jsonify({"erreur": "Accès non autorisé"}), 403
+    try:
+        rows = execute_query(
+            "SELECT email, date_inscription, pays, ville FROM utilisateurs",
+            fetch=True
+        )
+        utilisateurs = []
+        if rows:
+            for row in rows:
+                try:
+                    email = dechiffrer(row[0])
+                except Exception:
+                    email = row[0]
+                utilisateurs.append({
+                    "email": email, "date_inscription": row[1],
+                    "pays": row[2], "ville": row[3]
+                })
+        return jsonify({"total": len(utilisateurs), "utilisateurs": utilisateurs})
+    except Exception as e:
+        logging.error(f"Erreur admin utilisateurs: {str(e)}")
+        return jsonify({"erreur": "Erreur serveur"}), 500
+
+@app.route("/admin/regional", methods=["GET"])
+@limiter.limit("10 per hour")
+def admin_regional():
+    if not verifier_admin():
+        return jsonify({"erreur": "Accès non autorisé"}), 403
+    try:
+        rows = execute_query(
+            "SELECT date, user_email, user_pays, user_ville, compte_analyse, nom_complet, resultat, score_authenticite, score_suspicion FROM regional ORDER BY id DESC",
+            fetch=True
+        )
+        donnees = []
+        stats_pays = {}
+        stats_ville = {}
+        if rows:
+            for row in rows:
+                try:
+                    email = dechiffrer(row[1])
+                except Exception:
+                    email = row[1]
+                donnees.append({
+                    "date": row[0], "user_email": email, "user_pays": row[2],
+                    "user_ville": row[3], "compte_analyse": row[4], "nom_complet": row[5],
+                    "resultat": row[6], "score_authenticite": str(row[7]), "score_suspicion": str(row[8])
+                })
+                pays = row[2] or "Inconnu"
+                ville = row[3] or "Inconnue"
+                stats_pays[pays] = stats_pays.get(pays, 0) + 1
+                stats_ville[ville] = stats_ville.get(ville, 0) + 1
+
+        top_pays = sorted(stats_pays.items(), key=lambda x: x[1], reverse=True)
+        top_villes = sorted(stats_ville.items(), key=lambda x: x[1], reverse=True)
+
+        return jsonify({
+            "total_signalements": len(donnees),
+            "top_pays": [{"pays": p, "signalements": n} for p, n in top_pays[:10]],
+            "top_villes": [{"ville": v, "signalements": n} for v, n in top_villes[:10]],
+            "donnees": donnees
+        })
+    except Exception as e:
+        logging.error(f"Erreur admin régional: {str(e)}")
+        return jsonify({"erreur": "Erreur serveur"}), 500
+
+@app.route("/admin/denonciations", methods=["GET"])
+@limiter.limit("10 per hour")
+def admin_denonciations():
+    if not verifier_admin():
+        return jsonify({"erreur": "Accès non autorisé"}), 403
+    try:
+        rows = execute_query(
+            "SELECT id, date, user_email, compte_denonce, plateforme, type_arnaque, description, montant_escroqué, date_incident, pays_victime, ville_victime, score_fiabilite, statut FROM denonciations ORDER BY id DESC",
+            fetch=True
+        )
+        denonciations = []
+        stats_pays = {}
+        stats_ville = {}
+        stats_type = {}
+        stats_plateforme = {}
+
+        if rows:
+            for row in rows:
+                try:
+                    email = dechiffrer(row[2])
+                except Exception:
+                    email = row[2]
+                d = {
+                    "id": row[0], "date": row[1], "user_email": email,
+                    "compte_denonce": row[3], "plateforme": row[4],
+                    "type_arnaque": row[5], "description": row[6],
+                    "montant_escroqué": str(row[7]), "date_incident": row[8],
+                    "pays_victime": row[9], "ville_victime": row[10],
+                    "score_fiabilite": str(row[11]), "statut": row[12]
+                }
+                denonciations.append(d)
+                if row[12] == "valide":
+                    for val, dct in [(row[9], stats_pays), (row[10], stats_ville),
+                                     (row[5], stats_type), (row[4], stats_plateforme)]:
+                        if val:
+                            dct[val] = dct.get(val, 0) + 1
+
+        return jsonify({
+            "total": len(denonciations),
+            "valides": sum(1 for d in denonciations if d.get("statut") == "valide"),
+            "en_verification": sum(1 for d in denonciations if d.get("statut") == "en_verification"),
+            "top_pays": [{"pays": p, "denonciations": n} for p, n in sorted(stats_pays.items(), key=lambda x: x[1], reverse=True)[:10]],
+            "top_villes": [{"ville": v, "denonciations": n} for v, n in sorted(stats_ville.items(), key=lambda x: x[1], reverse=True)[:10]],
+            "top_types": [{"type": t, "denonciations": n} for t, n in sorted(stats_type.items(), key=lambda x: x[1], reverse=True)],
+            "top_plateformes": [{"plateforme": p, "denonciations": n} for p, n in sorted(stats_plateforme.items(), key=lambda x: x[1], reverse=True)],
+            "denonciations": denonciations
+        })
+    except Exception as e:
+        logging.error(f"Erreur admin dénonciations: {str(e)}")
+        return jsonify({"erreur": "Erreur serveur"}), 500
+
+@app.route("/admin/telecharger", methods=["GET"])
+@limiter.limit("5 per hour")
+def admin_telecharger():
+    if not verifier_admin():
+        return jsonify({"erreur": "Accès non autorisé"}), 403
+    try:
+        fichier = request.args.get("fichier", "collecte")
+        queries = {
+            "collecte": "SELECT date, user_email, user_pays, user_ville, ip_address, pays_ip, ville_ip, compte_analyse, nom_complet, resultat, score_authenticite, score_suspicion FROM collecte",
+            "regional": "SELECT date, user_email, user_pays, user_ville, compte_analyse, nom_complet, resultat, score_authenticite, score_suspicion FROM regional",
+            "denonciations": "SELECT id, date, user_email, compte_denonce, plateforme, type_arnaque, description, montant_escroqué, date_incident, pays_victime, ville_victime, score_fiabilite, statut FROM denonciations",
+            "utilisateurs": "SELECT email, date_inscription, pays, ville FROM utilisateurs"
+        }
+        if fichier not in queries:
+            return jsonify({"erreur": "Fichier inconnu"}), 400
+
+        rows = execute_query(queries[fichier], fetch=True)
+        if not rows:
+            return jsonify({"erreur": "Aucune donnée"}), 404
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerows(rows)
+        output.seek(0)
+
+        return send_file(
+            io.BytesIO(output.getvalue().encode("utf-8")),
+            mimetype="text/csv",
+            as_attachment=True,
+            download_name=f"cybertrust_{fichier}.csv"
+        )
+
+    except Exception as e:
+        logging.error(f"Erreur téléchargement: {str(e)}")
+        return jsonify({"erreur": "Erreur serveur"}), 500
+
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=False, port=5000)

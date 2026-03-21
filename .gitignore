@@ -1,6 +1,16 @@
-__pycache__/
-*.pyc
-*.pyo
+# Environnement
 .env
 venv/
-.venv/
+__pycache__/
+*.pyc
+
+# Modèle IA — ne pas publier sur GitHub
+models/
+*.pkl
+
+# Données CSV — ne pas publier sur GitHub
+*.csv
+
+# Fichiers système
+.DS_Store
+Thumbs.db

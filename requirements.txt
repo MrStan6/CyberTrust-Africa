@@ -11,3 +11,13 @@ flask-login
 flask-bcrypt
 flask-limiter
 python-dotenv
+flask-jwt-extended
+flask-talisman
+cryptography
+streamlit-cookies-manager
+folium
+streamlit-folium
+pycountry
+flask-cors
+psycopg2-binary
+sqlalchemy
