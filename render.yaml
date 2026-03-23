@@ -1,0 +1,42 @@
+services:
+  # ===== API Flask =====
+  - type: web
+    name: cybertrust-africa
+    env: python
+    buildCommand: pip install -r requirements.txt && python train_model.py
+    startCommand: gunicorn api:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    envVars:
+      - key: SECRET_KEY
+        sync: false
+      - key: JWT_SECRET_KEY
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: ADMIN_KEY
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: BREVO_SENDER_EMAIL
+        sync: false
+      - key: BREVO_SENDER_NAME
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+
+  # ===== Interface Streamlit =====
+  - type: web
+    name: cybertrust-africa-1
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+    envVars:
+      - key: ADMIN_KEY
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: APP_URL
+        sync: false

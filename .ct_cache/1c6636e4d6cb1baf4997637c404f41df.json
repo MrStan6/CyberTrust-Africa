@@ -1,0 +1,31 @@
+{
+  "historique": [
+    {
+      "date": "22/03/2026 05:04",
+      "compte_analyse": "Staneddfg",
+      "resultat": "Compte suspect 🚨",
+      "score_authenticite": 12.0,
+      "score_suspicion": 88.0
+    },
+    {
+      "date": "22/03/2026 04:36",
+      "compte_analyse": "Staned",
+      "resultat": "Compte suspect 🚨",
+      "score_authenticite": 12.0,
+      "score_suspicion": 88.0
+    }
+  ],
+  "dernier_resultat": {
+    "compte_analyse": "Staneddfg",
+    "deja_analyse_par_user": false,
+    "derniere_analyse": null,
+    "nb_analyses_total": 0,
+    "nb_denonciations": 0,
+    "region_utilisateur": "Abomey - Calavi, Benin",
+    "resultat": "Compte suspect 🚨",
+    "score_authenticite": 12.0,
+    "score_suspicion": 88.0,
+    "signalements_region": 0,
+    "types_arnaque": []
+  }
+}
