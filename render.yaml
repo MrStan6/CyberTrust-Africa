@@ -1,5 +1,4 @@
 services:
-  # ===== API Flask =====
   - type: web
     name: cybertrust-africa
     env: python
@@ -26,8 +25,9 @@ services:
         sync: false
       - key: ALLOWED_ORIGINS
         sync: false
+      - key: APP_URL
+        sync: false
 
-  # ===== Interface Streamlit =====
   - type: web
     name: cybertrust-africa-1
     env: python
@@ -38,5 +38,5 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
-      - key: APP_URL
+      - key: API_URL
         sync: false
