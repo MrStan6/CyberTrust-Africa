@@ -594,8 +594,8 @@ def analyser():
         model = get_model()
         prediction = model.predict(user_data)
         probability = model.predict_proba(user_data)
-        score_authentique = round(probability[0][0] * 100, 2)
-        score_fake = round(probability[0][1] * 100, 2)
+        score_authentique = float(round(probability[0][0] * 100, 2))
+        score_fake = float(round(probability[0][1] * 100, 2))
         resultat = "Compte authentique ✅" if prediction[0] == 0 else "Compte suspect 🚨"
 
         ip_address = request.remote_addr or "inconnue"
