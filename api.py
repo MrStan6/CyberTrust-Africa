@@ -45,7 +45,7 @@ Talisman(app, force_https=False, strict_transport_security=True,
          x_content_type_options=True, frame_options='DENY', content_security_policy=False)
 
 limiter = Limiter(app=app, key_func=get_remote_address,
-                  default_limits=["100 per day", "10 per minute"])
+                  default_limits=["1000 per day", "60 per minute"])
 
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "").encode()
 try:
@@ -369,7 +369,7 @@ def home():
 
 # ✅ NOUVEAU — Vérification JWT token
 @app.route("/verifier-token", methods=["POST"])
-@limiter.limit("60 per minute")
+@limiter.exempt
 def verifier_token():
     try:
         token = request.json.get("token", "")
@@ -434,7 +434,7 @@ def renvoyer_verification():
         return jsonify({"erreur": "Erreur serveur"}), 500
 
 @app.route("/inscription", methods=["POST"])
-@limiter.limit("5 per hour")
+@limiter.limit("10 per hour")
 def inscription():
     try:
         data = request.json
@@ -482,7 +482,7 @@ def inscription():
         return jsonify({"erreur": "Erreur serveur"}), 500
 
 @app.route("/connexion", methods=["POST"])
-@limiter.limit("5 per hour")
+@limiter.limit("20 per hour")
 def connexion():
     try:
         data = request.json
@@ -535,7 +535,7 @@ def connexion():
         return jsonify({"erreur": "Erreur serveur"}), 500
 
 @app.route("/analyser", methods=["POST"])
-@limiter.limit("20 per hour")
+@limiter.limit("100 per hour")
 def analyser():
     try:
         data = request.json
