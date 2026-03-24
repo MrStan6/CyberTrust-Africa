@@ -112,14 +112,38 @@ def get_model():
         return _model
     model_path = "models/cybertrust_model.pkl"
     if not os.path.exists(model_path):
-        logging.warning("Modèle absent — entraînement automatique...")
+        logging.warning("Modèle absent — entraînement automatique en cours...")
         try:
-            import subprocess
-            subprocess.run(["python", "train_model.py"], check=True)
-            logging.warning("Modèle entraîné avec succès")
+            os.makedirs("models", exist_ok=True)
+            import pandas as pd
+            from sklearn.ensemble import RandomForestClassifier
+            from sklearn.preprocessing import LabelEncoder
+
+            # Charger les datasets
+            train = pd.read_csv("dataset/train.csv")
+            test = pd.read_csv("dataset/test.csv")
+            df = pd.concat([train, test], ignore_index=True)
+
+            # Features
+            feature_cols = [
+                "profile pic", "nums/length username", "fullname words",
+                "nums/length fullname", "name==username", "description length",
+                "external URL", "private", "#posts", "#followers", "#follows"
+            ]
+            # Vérifier les colonnes disponibles
+            available = [c for c in feature_cols if c in df.columns]
+            target_col = "fake" if "fake" in df.columns else df.columns[-1]
+
+            X = df[available].fillna(0)
+            y = df[target_col]
+
+            clf = RandomForestClassifier(n_estimators=200, max_depth=10, random_state=42)
+            clf.fit(X, y)
+            joblib.dump(clf, model_path)
+            logging.warning("Modèle entraîné et sauvegardé avec succès")
         except Exception as e:
-            logging.error(f"Erreur entraînement: {str(e)}")
-            raise FileNotFoundError(f"Impossible de créer le modèle: {e}")
+            logging.error("Erreur entraînement: " + str(e))
+            raise FileNotFoundError("Impossible de créer le modèle: " + str(e))
     _model = joblib.load(model_path)
     return _model
 
