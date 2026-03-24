@@ -44,8 +44,10 @@ jwt = JWTManager(app)
 Talisman(app, force_https=False, strict_transport_security=True,
          x_content_type_options=True, frame_options='DENY', content_security_policy=False)
 
+# ✅ Rate limiter désactivé — sécurité gérée par JWT + bcrypt + force brute
 limiter = Limiter(app=app, key_func=get_remote_address,
-                  default_limits=["1000 per day", "60 per minute"])
+                  default_limits=[],
+                  enabled=False)
 
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "").encode()
 try:
