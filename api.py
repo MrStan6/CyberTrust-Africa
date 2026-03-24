@@ -105,7 +105,31 @@ def envoyer_email_verification(email, token):
         logging.error(f"Erreur email: {str(e)}")
         return False
 
-model = joblib.load("models/cybertrust_model.pkl")
+# ✅ Chargement du modèle avec entraînement automatique si absent
+def get_model():
+    global _model
+    if _model is not None:
+        return _model
+    model_path = "models/cybertrust_model.pkl"
+    if not os.path.exists(model_path):
+        logging.warning("Modèle absent — entraînement automatique...")
+        try:
+            import subprocess
+            subprocess.run(["python", "train_model.py"], check=True)
+            logging.warning("Modèle entraîné avec succès")
+        except Exception as e:
+            logging.error(f"Erreur entraînement: {str(e)}")
+            raise FileNotFoundError(f"Impossible de créer le modèle: {e}")
+    _model = joblib.load(model_path)
+    return _model
+
+_model = None
+# Charger le modèle au démarrage
+try:
+    _model = get_model()
+    logging.warning("Modèle chargé avec succès")
+except Exception as e:
+    logging.error(f"Modèle non disponible au démarrage: {str(e)}")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 engine = None
@@ -543,6 +567,7 @@ def analyser():
             data.get("posts", 0), data.get("followers", 0), data.get("follows", 0)
         ]])
 
+        model = get_model()
         prediction = model.predict(user_data)
         probability = model.predict_proba(user_data)
         score_authentique = round(probability[0][0] * 100, 2)
