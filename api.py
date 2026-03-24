@@ -623,8 +623,9 @@ def analyser():
         })
 
     except Exception as e:
-        logging.error(f"Erreur analyse: {str(e)}")
-        return jsonify({"erreur": "Erreur serveur"}), 500
+        err_msg = str(e)
+        logging.error("Erreur analyse: " + err_msg)
+        return jsonify({"erreur": "Erreur serveur: " + err_msg}), 500
 
 @app.route("/denoncer", methods=["POST"])
 @limiter.limit("3 per hour")
