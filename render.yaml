@@ -3,7 +3,7 @@ services:
     name: cybertrust-africa
     env: python
     buildCommand: pip install -r requirements.txt && python train_model.py
-    startCommand: gunicorn api:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    startCommand: gunicorn api:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120 --keep-alive 5
     envVars:
       - key: SECRET_KEY
         sync: false
@@ -32,7 +32,7 @@ services:
     name: cybertrust-africa-1
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false
     envVars:
       - key: ADMIN_KEY
         sync: false
