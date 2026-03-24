@@ -58,7 +58,7 @@ ADMIN_KEY = os.getenv("ADMIN_KEY", "")
 # ==============================
 # Vérification email
 # ==============================
-VERIFICATION_EMAIL_ACTIVE = True
+VERIFICATION_EMAIL_ACTIVE = False
 
 # ==============================
 # Brevo
@@ -437,7 +437,7 @@ def verifier_email():
     </body></html>"""
 
 @app.route("/renvoyer-verification", methods=["POST"])
-@limiter.limit("3 per hour")
+@limiter.exempt
 def renvoyer_verification():
     try:
         data = request.json
@@ -458,7 +458,7 @@ def renvoyer_verification():
         return jsonify({"erreur": "Erreur serveur"}), 500
 
 @app.route("/inscription", methods=["POST"])
-@limiter.limit("10 per hour")
+@limiter.exempt
 def inscription():
     try:
         data = request.json
@@ -506,7 +506,7 @@ def inscription():
         return jsonify({"erreur": "Erreur serveur"}), 500
 
 @app.route("/connexion", methods=["POST"])
-@limiter.limit("20 per hour")
+@limiter.exempt
 def connexion():
     try:
         data = request.json
