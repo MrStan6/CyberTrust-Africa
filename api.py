@@ -5,8 +5,6 @@
 
 from flask import Flask, request, jsonify, send_file
 from flask_bcrypt import Bcrypt
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
 from flask_jwt_extended import JWTManager, create_access_token, decode_token
 from flask_talisman import Talisman
 from flask_cors import CORS
@@ -44,10 +42,6 @@ jwt = JWTManager(app)
 Talisman(app, force_https=False, strict_transport_security=True,
          x_content_type_options=True, frame_options='DENY', content_security_policy=False)
 
-# ✅ Rate limiter désactivé — sécurité gérée par JWT + bcrypt + force brute
-limiter = Limiter(app=app, key_func=get_remote_address,
-                  default_limits=[],
-                  enabled=False)
 
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "").encode()
 try:
@@ -60,7 +54,7 @@ ADMIN_KEY = os.getenv("ADMIN_KEY", "")
 # ==============================
 # Vérification email
 # ==============================
-VERIFICATION_EMAIL_ACTIVE = False
+VERIFICATION_EMAIL_ACTIVE = True
 
 # ==============================
 # Brevo
@@ -395,7 +389,6 @@ def home():
 
 # ✅ NOUVEAU — Vérification JWT token
 @app.route("/verifier-token", methods=["POST"])
-@limiter.exempt
 def verifier_token():
     try:
         token = request.json.get("token", "")
@@ -439,7 +432,6 @@ def verifier_email():
     </body></html>"""
 
 @app.route("/renvoyer-verification", methods=["POST"])
-@limiter.exempt
 def renvoyer_verification():
     try:
         data = request.json
@@ -460,7 +452,6 @@ def renvoyer_verification():
         return jsonify({"erreur": "Erreur serveur"}), 500
 
 @app.route("/inscription", methods=["POST"])
-@limiter.exempt
 def inscription():
     try:
         data = request.json
@@ -508,7 +499,6 @@ def inscription():
         return jsonify({"erreur": "Erreur serveur"}), 500
 
 @app.route("/connexion", methods=["POST"])
-@limiter.exempt
 def connexion():
     try:
         data = request.json
@@ -561,7 +551,6 @@ def connexion():
         return jsonify({"erreur": "Erreur serveur"}), 500
 
 @app.route("/analyser", methods=["POST"])
-@limiter.limit("100 per hour")
 def analyser():
     try:
         data = request.json
@@ -654,7 +643,6 @@ def analyser():
         return jsonify({"erreur": "Erreur serveur: " + err_msg}), 500
 
 @app.route("/denoncer", methods=["POST"])
-@limiter.limit("3 per hour")
 def denoncer():
     try:
         data = request.json
@@ -772,7 +760,6 @@ def carte_stats():
         return jsonify({"erreur": "Erreur serveur"}), 500
 
 @app.route("/admin/collecte", methods=["GET"])
-@limiter.exempt
 def admin_collecte():
     if not verifier_admin():
         return jsonify({"erreur": "Accès non autorisé"}), 403
@@ -800,7 +787,6 @@ def admin_collecte():
         return jsonify({"erreur": "Erreur serveur"}), 500
 
 @app.route("/admin/utilisateurs", methods=["GET"])
-@limiter.exempt
 def admin_utilisateurs():
     if not verifier_admin():
         return jsonify({"erreur": "Accès non autorisé"}), 403
@@ -824,7 +810,6 @@ def admin_utilisateurs():
         return jsonify({"erreur": "Erreur serveur"}), 500
 
 @app.route("/admin/regional", methods=["GET"])
-@limiter.exempt
 def admin_regional():
     if not verifier_admin():
         return jsonify({"erreur": "Accès non autorisé"}), 403
@@ -860,7 +845,6 @@ def admin_regional():
         return jsonify({"erreur": "Erreur serveur"}), 500
 
 @app.route("/admin/denonciations", methods=["GET"])
-@limiter.exempt
 def admin_denonciations():
     if not verifier_admin():
         return jsonify({"erreur": "Accès non autorisé"}), 403
@@ -904,7 +888,6 @@ def admin_denonciations():
         return jsonify({"erreur": "Erreur serveur"}), 500
 
 @app.route("/admin/telecharger", methods=["GET"])
-@limiter.exempt
 def admin_telecharger():
     if not verifier_admin():
         return jsonify({"erreur": "Accès non autorisé"}), 403
