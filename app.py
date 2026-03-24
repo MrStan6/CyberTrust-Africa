@@ -559,10 +559,15 @@ def _safe_api_call(func):
     """Wrapper pour gérer les erreurs API proprement"""
     try:
         result = func()
-        if result.status_code == 200:
+        if result.status_code in [200, 201]:
             return result.json()
         else:
-            return {"erreur": f"Erreur API {result.status_code}"}
+            # ✅ Retourner le vrai message d'erreur de l'API
+            try:
+                data = result.json()
+                return data  # Contient déjà {"erreur": "..."}
+            except Exception:
+                return {"erreur": f"Erreur API {result.status_code}"}
     except requests.exceptions.ConnectionError:
         return {"erreur": "❌ API Flask non démarrée — lancez python api.py"}
     except Exception as e:
