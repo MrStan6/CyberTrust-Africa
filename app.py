@@ -418,7 +418,7 @@ def verifier_jwt(token):
     try:
         if not token:
             return None
-        r = requests.post(f"{API_URL}/verifier-token", json={"token": token}, timeout=5)
+        r = requests.post(f"{API_URL}/verifier-token", json={"token": token}, timeout=30)
         if r.status_code == 200 and r.text.strip():
             return r.json()
         return None
@@ -521,17 +521,17 @@ def valider_mot_de_passe(mdp):
 def inscrire(email, mdp, pays, ville):
     return _safe_api_call(
         lambda: requests.post(f"{API_URL}/inscription",
-                              json={"email": email, "mot_de_passe": mdp, "pays": pays, "ville": ville}, timeout=10)
+                              json={"email": email, "mot_de_passe": mdp, "pays": pays, "ville": ville}, timeout=30)
     )
 
 def connecter(email, mdp):
     return _safe_api_call(
-        lambda: requests.post(f"{API_URL}/connexion", json={"email": email, "mot_de_passe": mdp}, timeout=10)
+        lambda: requests.post(f"{API_URL}/connexion", json={"email": email, "mot_de_passe": mdp}, timeout=30)
     )
 
 def renvoyer_verification(email):
     return _safe_api_call(
-        lambda: requests.post(f"{API_URL}/renvoyer-verification", json={"email": email}, timeout=10)
+        lambda: requests.post(f"{API_URL}/renvoyer-verification", json={"email": email}, timeout=30)
     )
 
 def get_historique():
@@ -539,7 +539,7 @@ def get_historique():
     if not email:
         return {"total_analyses": 0, "historique": []}
     return _safe_api_call(
-        lambda: requests.get(f"{API_URL}/historique", params={"email": email}, timeout=10)
+        lambda: requests.get(f"{API_URL}/historique", params={"email": email}, timeout=30)
     )
 
 def get_historique_denonciations():
@@ -547,12 +547,12 @@ def get_historique_denonciations():
     if not email:
         return {"total": 0, "denonciations": []}
     return _safe_api_call(
-        lambda: requests.get(f"{API_URL}/historique/denonciations", params={"email": email}, timeout=10)
+        lambda: requests.get(f"{API_URL}/historique/denonciations", params={"email": email}, timeout=30)
     )
 
 def get_carte_stats():
     return _safe_api_call(
-        lambda: requests.get(f"{API_URL}/carte/stats", timeout=10)
+        lambda: requests.get(f"{API_URL}/carte/stats", timeout=30)
     )
 
 def _safe_api_call(func):
@@ -562,40 +562,41 @@ def _safe_api_call(func):
         if result.status_code in [200, 201]:
             return result.json()
         else:
-            # ✅ Retourner le vrai message d'erreur de l'API
             try:
                 data = result.json()
-                return data  # Contient déjà {"erreur": "..."}
+                return data
             except Exception:
                 return {"erreur": f"Erreur API {result.status_code}"}
     except requests.exceptions.ConnectionError:
-        return {"erreur": "❌ API Flask non démarrée — lancez python api.py"}
+        return {"erreur": "❌ API non disponible — veuillez réessayer dans quelques secondes"}
+    except requests.exceptions.Timeout:
+        return {"erreur": "⏳ Le serveur se réveille — veuillez réessayer dans 30 secondes"}
     except Exception as e:
         return {"erreur": f"Erreur : {str(e)}"}
 
 def get_admin_collecte():
     return _safe_api_call(
-        lambda: requests.get(f"{API_URL}/admin/collecte", headers={"X-Admin-Key": ADMIN_KEY}, timeout=10)
+        lambda: requests.get(f"{API_URL}/admin/collecte", headers={"X-Admin-Key": ADMIN_KEY}, timeout=30)
     )
 
 def get_admin_utilisateurs():
     return _safe_api_call(
-        lambda: requests.get(f"{API_URL}/admin/utilisateurs", headers={"X-Admin-Key": ADMIN_KEY}, timeout=10)
+        lambda: requests.get(f"{API_URL}/admin/utilisateurs", headers={"X-Admin-Key": ADMIN_KEY}, timeout=30)
     )
 
 def get_admin_regional():
     return _safe_api_call(
-        lambda: requests.get(f"{API_URL}/admin/regional", headers={"X-Admin-Key": ADMIN_KEY}, timeout=10)
+        lambda: requests.get(f"{API_URL}/admin/regional", headers={"X-Admin-Key": ADMIN_KEY}, timeout=30)
     )
 
 def get_admin_denonciations():
     return _safe_api_call(
-        lambda: requests.get(f"{API_URL}/admin/denonciations", headers={"X-Admin-Key": ADMIN_KEY}, timeout=10)
+        lambda: requests.get(f"{API_URL}/admin/denonciations", headers={"X-Admin-Key": ADMIN_KEY}, timeout=30)
     )
 
 def soumettre_denonciation(data):
     return _safe_api_call(
-        lambda: requests.post(f"{API_URL}/denoncer", json=data, timeout=10)
+        lambda: requests.post(f"{API_URL}/denoncer", json=data, timeout=30)
     )
 
 def creer_carte(stats):
