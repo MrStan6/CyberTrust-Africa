@@ -566,7 +566,7 @@ def _safe_api_call(func):
                 data = result.json()
                 return data
             except Exception:
-                return {"erreur": f"Erreur API {result.status_code}"}
+                return {"erreur": f"Erreur {result.status_code}"}
     except requests.exceptions.ConnectionError:
         return {"erreur": "❌ API non disponible — veuillez réessayer dans quelques secondes"}
     except requests.exceptions.Timeout:

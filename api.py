@@ -54,7 +54,7 @@ ADMIN_KEY = os.getenv("ADMIN_KEY", "")
 # ==============================
 # Vérification email
 # ==============================
-VERIFICATION_EMAIL_ACTIVE = True
+VERIFICATION_EMAIL_ACTIVE = False
 
 # ==============================
 # Brevo
