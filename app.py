@@ -1034,28 +1034,61 @@ def page_admin_dashboard():
         if r4.get("denonciations"): st.download_button("⬇️ Dénonciations", pd.DataFrame(r4["denonciations"]).to_csv(index=False), "denonciations.csv", "text/csv", use_container_width=True)
 
 # ==============================
-# Page Principale — Navigation Sidebar
+# Page Principale — Navigation fixe en haut
 # ==============================
 def page_principale():
-    with st.sidebar:
-        st.markdown(f"""
-        <div style="padding:1rem 0 0.5rem;">
+    # ✅ Barre de navigation toujours visible en haut
+    st.markdown(f"""
+    <div style="background:#111827;border:0.5px solid rgba(245,158,11,0.2);border-radius:12px;
+                padding:10px 16px;margin-bottom:1rem;display:flex;align-items:center;justify-content:space-between;">
+        <div>
             <div style="font-size:13px;color:#f59e0b;font-weight:500;">👤 {st.session_state.email}</div>
-            <div style="font-size:11px;color:#6b7280;margin-top:2px;">📍 {st.session_state.ville}, {st.session_state.pays}</div>
+            <div style="font-size:11px;color:#6b7280;">📍 {st.session_state.ville}, {st.session_state.pays}</div>
         </div>
-        """, unsafe_allow_html=True)
-        st.markdown("---")
-        page = st.radio("Navigation", ["🔍 Analyser","🚨 Dénoncer","🗺️ Carte","📊 Historique","🔐 Admin"])
-        st.markdown("---")
-        if st.button("🚪 Se déconnecter", use_container_width=True):
+        <div style="font-size:20px;">🌍</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ✅ 5 boutons de navigation toujours visibles
+    nav_cols = st.columns(5)
+    nav_items = [
+        ("analyser", "🔍 Analyser"),
+        ("denoncer", "🚨 Dénoncer"),
+        ("carte", "🗺️ Carte"),
+        ("historique", "📊 Historique"),
+        ("admin", "🔐 Admin"),
+    ]
+    for i, (page_id, label) in enumerate(nav_items):
+        with nav_cols[i]:
+            is_active = st.session_state.page_active == page_id
+            if is_active:
+                st.markdown(f"""
+                <div style="background:rgba(245,158,11,0.15);border:0.5px solid rgba(245,158,11,0.4);
+                            border-radius:8px;padding:8px 4px;text-align:center;font-size:12px;
+                            color:#f59e0b;font-weight:500;cursor:pointer;">
+                    {label}
+                </div>
+                """, unsafe_allow_html=True)
+            if st.button(label, key=f"nav_{page_id}", use_container_width=True):
+                st.session_state.page_active = page_id
+                st.rerun()
+
+    # ✅ Bouton déconnexion
+    col1, col2 = st.columns([4, 1])
+    with col2:
+        if st.button("🚪 Déco.", use_container_width=True):
             effacer_session()
             st.rerun()
 
-    if page == "🔍 Analyser": page_analyser()
-    elif page == "🚨 Dénoncer": page_denoncer()
-    elif page == "🗺️ Carte": page_carte()
-    elif page == "📊 Historique": page_historique()
-    elif page == "🔐 Admin":
+    st.markdown("---")
+
+    # ✅ Afficher la page active
+    page = st.session_state.page_active
+    if page == "analyser": page_analyser()
+    elif page == "denoncer": page_denoncer()
+    elif page == "carte": page_carte()
+    elif page == "historique": page_historique()
+    elif page == "admin":
         if st.session_state.admin_connecte: page_admin_dashboard()
         else: page_admin_login()
 
