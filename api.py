@@ -509,10 +509,10 @@ def connexion():
             return jsonify({"erreur": "Email et mot de passe requis"}), 400
 
         tentatives, derniere = get_tentatives(email)
-        if tentatives >= 5 and derniere:
+        if tentatives >= 10 and derniere:
             derniere_dt = datetime.strptime(derniere, "%d/%m/%Y %H:%M")
-            if datetime.now() - derniere_dt < timedelta(minutes=30):
-                return jsonify({"erreur": "Compte bloqué — réessayez dans 30 minutes"}), 429
+            if datetime.now() - derniere_dt < timedelta(minutes=5):
+                return jsonify({"erreur": "Compte bloqué — réessayez dans 5 minutes"}), 429
             else:
                 reinitialiser_tentatives(email)
 
@@ -527,7 +527,7 @@ def connexion():
             if tentatives_restantes > 0:
                 return jsonify({"erreur": f"Mot de passe incorrect — {tentatives_restantes} tentatives restantes"}), 401
             else:
-                return jsonify({"erreur": "Compte bloqué — réessayez dans 30 minutes"}), 429
+                return jsonify({"erreur": "Trop de tentatives — réessayez dans 5 minutes"}), 429
 
         if VERIFICATION_EMAIL_ACTIVE and not user.get("email_verifie"):
             return jsonify({

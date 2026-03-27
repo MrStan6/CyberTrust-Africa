@@ -942,7 +942,7 @@ def page_admin_dashboard():
     st.title("🔐 Dashboard Administrateur")
     col1, col2 = st.columns([4,1])
     with col2:
-        if st.button("🚪 Déco.", use_container_width=True):
+        if st.button("🚪 Déco. Admin", key="admin_logout_btn", use_container_width=True):
             st.session_state.admin_connecte = False
             st.rerun()
 
@@ -1069,14 +1069,14 @@ def page_principale():
                     {label}
                 </div>
                 """, unsafe_allow_html=True)
-            if st.button(label, key=f"nav_{page_id}", use_container_width=True):
+            if st.button(label, key=f"nav_btn_{page_id}", use_container_width=True):
                 st.session_state.page_active = page_id
                 st.rerun()
 
     # ✅ Bouton déconnexion
     col1, col2 = st.columns([4, 1])
     with col2:
-        if st.button("🚪 Déco.", use_container_width=True):
+        if st.button("🚪 Déco.", key="main_logout_btn", use_container_width=True):
             effacer_session()
             st.rerun()
 
