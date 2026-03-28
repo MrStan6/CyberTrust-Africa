@@ -951,67 +951,71 @@ def page_admin_dashboard():
 
     with tabs[0]:
         st.markdown("### 📊 Toutes les analyses")
-        result = api_get("/admin/collecte", headers=headers)
-        if "erreur" in result: st.error(f"❌ {result['erreur']}")
-        else:
-            total = result.get("total",0)
-            donnees = result.get("donnees",[])
-            suspects = sum(1 for d in donnees if "suspect" in d.get("resultat","").lower())
-            col1,col2,col3 = st.columns(3)
-            with col1: st.metric("Total",total)
-            with col2: st.metric("✅ Authentiques",total-suspects)
-            with col3: st.metric("🚨 Suspects",suspects)
-            if donnees:
-                st.markdown("---")
-                search = st.text_input("🔍 Rechercher", key="admin_search")
-                df = pd.DataFrame(donnees)
-                if search:
-                    df = df[df["compte_analyse"].str.contains(search, case=False, na=False)]
-                df = df.rename(columns={"date":"Date","user_email":"Email","user_pays":"Pays","user_ville":"Ville","compte_analyse":"Compte","resultat":"Résultat","score_authenticite":"Auth%","score_suspicion":"Susp%"})
-                st.dataframe(df[["Date","Email","Pays","Ville","Compte","Résultat","Auth%","Susp%"]], use_container_width=True)
+        if st.button("🔄 Charger les analyses", key="load_analyses", use_container_width=True):
+            result = api_get("/admin/collecte", headers=headers)
+            if "erreur" in result: st.error(f"❌ {result['erreur']}")
             else:
-                st.info("Aucune analyse enregistrée")
+                total = result.get("total",0)
+                donnees = result.get("donnees",[])
+                suspects = sum(1 for d in donnees if "suspect" in d.get("resultat","").lower())
+                col1,col2,col3 = st.columns(3)
+                with col1: st.metric("Total",total)
+                with col2: st.metric("✅ Authentiques",total-suspects)
+                with col3: st.metric("🚨 Suspects",suspects)
+                if donnees:
+                    st.markdown("---")
+                    search = st.text_input("🔍 Rechercher", key="admin_search")
+                    df = pd.DataFrame(donnees)
+                    if search:
+                        df = df[df["compte_analyse"].str.contains(search, case=False, na=False)]
+                    df = df.rename(columns={"date":"Date","user_email":"Email","user_pays":"Pays","user_ville":"Ville","compte_analyse":"Compte","resultat":"Résultat","score_authenticite":"Auth%","score_suspicion":"Susp%"})
+                    st.dataframe(df[["Date","Email","Pays","Ville","Compte","Résultat","Auth%","Susp%"]], use_container_width=True)
+                else:
+                    st.info("Aucune analyse enregistrée")
 
     with tabs[1]:
         st.markdown("### 👥 Utilisateurs inscrits")
-        result = api_get("/admin/utilisateurs", headers=headers)
-        if "erreur" in result: st.error(f"❌ {result['erreur']}")
-        else:
-            st.info(f"Total : **{result.get('total',0)}**")
-            if result.get("utilisateurs"):
-                df = pd.DataFrame(result["utilisateurs"])
-                df = df.rename(columns={"email":"Email","date_inscription":"Inscription","pays":"Pays","ville":"Ville","email_verifie":"Vérifié"})
-                st.dataframe(df, use_container_width=True)
+        if st.button("🔄 Charger les utilisateurs", key="load_users", use_container_width=True):
+            result = api_get("/admin/utilisateurs", headers=headers)
+            if "erreur" in result: st.error(f"❌ {result['erreur']}")
+            else:
+                st.info(f"Total : **{result.get('total',0)}**")
+                if result.get("utilisateurs"):
+                    df = pd.DataFrame(result["utilisateurs"])
+                    df = df.rename(columns={"email":"Email","date_inscription":"Inscription","pays":"Pays","ville":"Ville","email_verifie":"Vérifié"})
+                    st.dataframe(df, use_container_width=True)
 
     with tabs[2]:
         st.markdown("### 📍 Signalements régionaux")
-        result = api_get("/admin/regional", headers=headers)
-        if "erreur" in result: st.error(f"❌ {result['erreur']}")
-        else:
-            st.info(f"Suspects uniques : **{result.get('total_signalements',0)}**")
-            col1,col2 = st.columns(2)
-            with col1:
-                if result.get("top_pays"):
-                    df = pd.DataFrame(result["top_pays"])
-                    df.columns = ["Pays","Signalements"]
-                    st.dataframe(df, use_container_width=True)
-            with col2:
-                if result.get("top_villes"):
-                    df = pd.DataFrame(result["top_villes"])
-                    df.columns = ["Ville","Signalements"]
-                    st.dataframe(df, use_container_width=True)
+        if st.button("🔄 Charger les signalements", key="load_regional", use_container_width=True):
+            result = api_get("/admin/regional", headers=headers)
+            if "erreur" in result: st.error(f"❌ {result['erreur']}")
+            else:
+                st.info(f"Suspects uniques : **{result.get('total_signalements',0)}**")
+                col1,col2 = st.columns(2)
+                with col1:
+                    if result.get("top_pays"):
+                        df = pd.DataFrame(result["top_pays"])
+                        df.columns = ["Pays","Signalements"]
+                        st.dataframe(df, use_container_width=True)
+                with col2:
+                    if result.get("top_villes"):
+                        df = pd.DataFrame(result["top_villes"])
+                        df.columns = ["Ville","Signalements"]
+                        st.dataframe(df, use_container_width=True)
 
     with tabs[3]:
         st.markdown("### 🚨 Dénonciations")
-        result = api_get("/admin/denonciations", headers=headers)
-        if "erreur" in result: st.error(f"❌ {result['erreur']}")
-        else:
-            col1,col2,col3 = st.columns(3)
-            with col1: st.metric("Total",result.get("total",0))
-            with col2: st.metric("✅ Validées",result.get("valides",0))
-            with col3: st.metric("⏳ En vérif.",result.get("en_verification",0))
-            if result.get("denonciations"):
-                st.dataframe(pd.DataFrame(result["denonciations"]), use_container_width=True)
+        if st.button("🔄 Charger les dénonciations", key="load_denons", use_container_width=True):
+            result = api_get("/admin/denonciations", headers=headers)
+            if "erreur" in result: st.error(f"❌ {result['erreur']}")
+            else:
+                col1,col2,col3 = st.columns(3)
+                with col1: st.metric("Total",result.get("total",0))
+                with col2: st.metric("✅ Validées",result.get("valides",0))
+                with col3: st.metric("⏳ En vérif.",result.get("en_verification",0))
+                if result.get("denonciations"):
+                    st.dataframe(pd.DataFrame(result["denonciations"]), use_container_width=True)
 
     with tabs[4]:
         st.markdown("### 🗺️ Carte Admin")
